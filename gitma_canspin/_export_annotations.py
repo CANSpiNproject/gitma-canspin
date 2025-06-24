@@ -30,11 +30,22 @@ def get_spacy_df(text: str, spacy_model_lang: str = 'German', nlp_max_text_len: 
         Args:
             loaded_model (spacy.Language): The model loaded with spacys load method whose tokenization you want to customize.
         """
-        all_prefixes_re = spacy.util.compile_prefix_regex(tuple(list(nlp.Defaults.prefixes) + ['-','‐','˗','‒','–','—','―','−','─']))
+        all_prefixes_re = spacy.util.compile_prefix_regex(tuple(list(loaded_model.Defaults.prefixes) + ['-','‐','˗','‒','–','—','―','−','─']))
         loaded_model.tokenizer.prefix_search = all_prefixes_re.search
+
+    def _fix_german_tokenization(loaded_model: spacy.Language) -> None:
+        """Helper function to fix tokenization of german texts by isolating single guillemets.
+
+        Args:
+            loaded_model (spacy.Language): The model loaded with spacys load method whose tokenization you want to customize.
+        """
+        all_prefixes_re = spacy.util.compile_prefix_regex(tuple(list(loaded_model.Defaults.prefixes) + ['›']))
+        all_suffixes_re = spacy.util.compile_suffix_regex(tuple(list(loaded_model.Defaults.suffixes) + ['‹']))
+        loaded_model.tokenizer.prefix_search = all_prefixes_re.search
+        loaded_model.tokenizer.suffix_search = all_suffixes_re.search
     
     lang_dict = {
-        'German': {'model': 'de_core_news_sm', 'customizations': None},
+        'German': {'model': 'de_core_news_sm', 'customizations': _fix_german_tokenization},
         'English': {'model': 'en_core_web_sm', 'customizations': None},
         'Multilingual': {'model': 'xx_ent_wiki_sm', 'customizations': None},
         'French': {'model': 'fr_core_news_sm', 'customizations': None},
