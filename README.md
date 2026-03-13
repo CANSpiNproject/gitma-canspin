@@ -1,11 +1,11 @@
 # gitma-CANSpiN
-![version](https://img.shields.io/badge/version-1.6.5-blue)
+![version](https://img.shields.io/badge/version-1.7.0-blue)
 [![License: GPL v3](https://img.shields.io/badge/License-GPL_v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15388462.svg)](https://doi.org/10.5281/zenodo.15388462)
 
 The repository is used to adapt [GitMA](https://github.com/forTEXT/gitma) 2.0.1 for the CANSpiN project. The adapted version is available as a Python package here as *gitma_canspin* and can be used in the project pipeline for export, analysis, visualization and the creation of a gold standard of annotations from Catma.
 
-**This package is still a work in progress and is currently not being tested for use in project scenarios other than the CANSpiN project. If you discover problems in your application scenario, please do not hesitate to contact us.**
+**This package is still a work in progress and is currently not fully tested for use in project scenarios other than the CANSpiN project. If you discover problems in your application scenario, please do not hesitate to contact us.**
 
 ## Customizations in GitMA
 - added *canspin* module with the classes `CanspinProject`, `AnnotationExporter`, `AnnotationAnalyzer` and `AnnotationManipulator`
@@ -55,7 +55,7 @@ The unit and integration tests are currently being developed. To run the tests, 
 ## Getting started
 The package *gitma_canspin* is designed to handle multi-class annotations, i.e. every token of a text can only be assigned to one class. Based on that, you can use *gitma_canspin* for exporting [Catma](https://catma.de/) annotation data into `.tsv` and TEI-conform `.xml` files with inline annotations, for computing statistical data about annotations, creating visualizations, calculating inter-annotator agreements and creating goldstandard annotation collections.
 
-Currently, a **Streamlit** app is being added to the package that allows all the features of the *canspin* module to be used in a GUI. Once the virtual environment is activated, the app can be started from every folder in the terminal: `gui-start`. Independently of the reference to the Streamlit app, step-by-step instructions for creating your own Jupyter Notebooks and scripts now follow. Three classes are currently provided for working with the package: [AnnotationExporter](#annotationexporter), [AnnotationAnalyzer](#annotationanalyzer) and [AnnotationManipulator](#annotationmanipulator). All three depend on a Catma project being loaded first. This is demonstrated below using the loading of an exporter.
+Currently, a **Streamlit** app is being added to the package that allows all the features of the *canspin* module to be used in a GUI. Once the virtual environment is activated, the app can be started from every folder in the terminal: `gui-start`. Independently of the reference to the Streamlit app, step-by-step instructions for creating your own Jupyter Notebooks and scripts now follow. Three classes are currently provided for working with the package: [AnnotationExporter](#annotationexporter), [AnnotationAnalyzer](#annotationanalyzer) and [AnnotationManipulator](#annotationmanipulator). All three can download or locally load a Catma project. This is demonstrated below using the loading of an exporter.
 
 - To code along, first of all place the content of the [DH2025 repository](https://github.com/CANSpiNproject/dh2025.git) inside your project folder. Then create a new Python script or a Jupyter Notebook in the project folder. The folder structure should look like this:
     ```
@@ -72,8 +72,8 @@ Currently, a **Streamlit** app is being added to the package that allows all the
       .gitignore
       bibliography.bib
       CITATION.cff
-      my_script.py
-      my_notebook.ipynb
+      my_script.py <----------
+      my_notebook.ipynb <----------
       perform_analysis.ipynb
       README.md
     ```
@@ -84,14 +84,18 @@ Currently, a **Streamlit** app is being added to the package that allows all the
 - Define the initialization settings for the exporter, here for the Catma project DH2025 CANSpiN data:
     ```python
     my_exporter_init_settings = {
+      'init_with_catma_project': True,
+      'init_with_tsv_annotations': True,
       'project_name': 'CATMA_4AA4ADC0-4C28-54F9-B6A1-5DCEFF34B90B_DH2025_CANSpiN',
       'selected_annotation_collection': None,
       'load_from_gitlab': False,
       'gitlab_access_token': None
     }
     ```
+  - `init_with_catma_project` (bool, default: `True`) controls if the exporter is loaded with an initial loading of a Catma project. It can also be loaded after initialization with the `load_project` method.
+  - `init_with_tsv_annotations` (bool, default: `True`) controls if the exporter is loaded with an initial loading of tsv annotation files. If this option is activated, the `project_name` property is used to search for corresponding corpora folders inside the project folder based on the Catma project to corpora folder mapping defined under the key `catma_projects` in the *gitma-canspin* config file `api_configs/config.yaml`. The tsv annotation data can also be loaded after initialization with the `load_tsv_annotations` method.
   - `project_name` (str, default: `'CATMA_4AA4ADC0-4C28-54F9-B6A1-5DCEFF34B90B_DH2025_CANSpiN'`) is defined in Catma and corresponds to the folder name of a project, which can be obtained by logging into the Catma backend ([https://git.catma.de](https://git.catma.de)), if you have a Catma account. The default value is the folder name of the Catma project for the DH2025 data of the CANSpiN project.
-  - `selected_annotation_collection` (str or list\[str\], default: `None`) allows you to filter by the name of annotation collections to load only a selection of annotation collections into the exporter. The delivered strings must match exactly the names of the annotation collections. This is only an optional step: The command for executing the export (`exporter.run()`) uses an index value as an argument, which is needed to select the annotation collection to be exported from the collections loaded in the exporter. With the help of `exporter.print_projects_annotation_collection_list()`, you can view the list of all loaded collections and find out the corresponding index values. By filtering via the `filter_for_text` parameter, the possibly long list of annotation collections can also be reduced to those in the printout that refer to a specific text. Previously, the list of annotation collections in the project can already be reduced for a better overview when initializing the exporter via the `selected_annotation_collection` setting.
+  - `selected_annotation_collection` (str or list\[str\], default: `None`) allows you to filter by the name of annotation collections to load only a selection of annotation collections from a Catma project into the exporter. The delivered strings must match exactly the names of the annotation collections. This is only an optional step: The command for executing the export (`exporter.run()`) uses an index value as an argument, which is needed to select the annotation collection to be exported from the collections loaded in the exporter. With the help of `exporter.print_projects_annotation_collection_list()`, you can view the list of all loaded collections and find out the corresponding index values. By filtering via the `filter_for_text` parameter, the possibly long list of annotation collections can also be reduced to those in the printout that refer to a specific text. Previously, the list of annotation collections in the project can already be reduced for a better overview when initializing the exporter via the `selected_annotation_collection` setting.
   - `load_from_gitlab` (bool, default: `False`) indicates whether the data should be downloaded from the Catma backend or used locally from an already downloaded folder (which would then be located in the project folder). By default, a local folder in the project folder is being searched for. If the data is to be downloaded, the `gitlab_access_token` is required to get access to the project data at Catma, and the corresponding folder with the data is created in the project folder.
 
       **ATTENTION**: If the data has already been downloaded, i.e. the data folder already exists in the project folder, downloading again will raise an error: The old folder will not be overwritten by *gitma*, but must first be deleted manually if desired. An existing local project can, however, also be updated without deleting the existing one using the method `exporter.update_project()`: Load the exporter accordingly with `load_from_gitlab = False` and then run the update method after loading.
@@ -100,7 +104,7 @@ Currently, a **Streamlit** app is being added to the package that allows all the
     ```python
     exporter = AnnotationExporter(init_settings=my_exporter_init_settings)
     ```
-    If the exporter has received the correct init values, a list of all loaded annotation collections of the project `CATMA_4AA4ADC0-4C28-54F9-B6A1-5DCEFF34B90B_DH2025_CANSpiN` is displayed in the terminal. In addition, all TSV annotation data of the folders `canspin-deu-19/cs1-tsv`, `canspin-deu-20/cs1-tsv`, `canspin-spa-19/cs1-tsv`, and `canspin-lat-19/cs1-tsv` is loaded. You can check it by executing the line:
+    If the exporter has received the correct init values, a list of all loaded annotation collections of the project `CATMA_4AA4ADC0-4C28-54F9-B6A1-5DCEFF34B90B_DH2025_CANSpiN` is displayed in the terminal. In addition, all tsv annotation data of the folders `canspin-deu-19/cs1-tsv`, `canspin-deu-20/cs1-tsv`, `canspin-spa-19/cs1-tsv`, and `canspin-lat-19/cs1-tsv` is loaded. You can check it by executing the line:
     ```python
     exporter.print_tsv_annotations_overview()
     ```
@@ -116,7 +120,7 @@ exporter.project
 ```
 
 ### AnnotationExporter
-This class is designed to export CATMA annotations into `.tsv` and TEI-conform `.xml` files. This step is part of the project pipeline: preparing the annotations for usage in training classifiers.
+This class is designed to export Catma annotations into `.tsv` and TEI-conform `.xml` files. This step is part of the project pipeline: preparing the annotations for usage in training classifiers.
 
 #### Getting started
 - In the processing settings, select the text segment that is to be selected from the document of the annotation collection to be exported:
@@ -176,7 +180,7 @@ This class is designed to export CATMA annotations into `.tsv` and TEI-conform `
     - `output_tsv_file_name` (str, default: `'annotated_tei'`): Name of the file created in the project folder without the extension.
 
 ### AnnotationAnalyzer
-The class is used to determine statistics from and generate visualizations of TSV and CATMA annotations. Currently, pie charts can be generated to show the quantity of annotation class instances (`analyzer.render_overview_pie_chart()`) and bar charts to show the distribution (`analyzer.render_progression_bar_chart()`). A method for determining an inter-annotator agreement based on the gamma metric using two or more annotation collections is also implemented (`analyzer.get_iaa()`). In addition, various statistical values can be determined using loaded annotation tsv files (`analyzer.get_corpus_annotation_statistics()`). All methods except `get_iaa()` require the corpus repositories to be located in the project folder, as the TSV data in it is loaded from these repositories on initialization of the `AnnotationAnalyzer` instance.
+The class is used to determine statistics from and generate visualizations of tsv and Catma annotations. Currently, pie charts can be generated to show the quantity of annotation class instances (`analyzer.render_overview_pie_chart()`) and bar charts to show the distribution (`analyzer.render_progression_bar_chart()`). A method for determining an inter-annotator agreement based on the gamma metric using two or more annotation collections is also implemented (`analyzer.get_iaa()`). In addition, various statistical values can be determined using loaded annotation tsv files (`analyzer.get_corpus_annotation_statistics()`). All methods except `get_iaa()` require the corpus repositories with tsv annotation data to be located in the project folder.
 
 #### Getting started
 tba
@@ -185,10 +189,20 @@ tba
 tba
 
 ### AnnotationManipulator
-The class is used to modify or create CATMA annotations. A method for creating a gold standard for the annotation of a document based on existing annotation collections is implemented (`manipulator.create_gold_standard_ac()`), but at the moment only in a strict mode: Annotations must exactly match in selection and classification in order to be included in the gold standard collection.
+The class is used to modify or create Catma annotations. A method for creating a gold standard for the annotation of a document based on existing annotation collections is implemented (`manipulator.create_gold_standard_ac()`), but at the moment only in a strict mode: Annotations must exactly match in selection and classification in order to be included in the gold standard collection.
 
 #### Getting started
 tba
 
 #### All configuration options
 tba
+
+## Configurations
+After the first initialization of an [AnnotationExporter](#annotationexporter), [AnnotationAnalyzer](#annotationanalyzer) or [AnnotationManipulator](#annotationmanipulator) instance a *gitma-canspin* configuration file `config.yaml` is created in the `api_configs` folder inside the project folder. You can change settings here to adopt *gitma-canspin* to your project needs.
+
+<!-- TODO: change config structure: add language definition for every file of a corpus under 'catma_projects' keys -->
+
+- `catma_projects`: Define Catma projects here as well as corresponding corpora folders, which will be searched for in the project folder when loading tsv annotations.
+- `category_and_class_systems`: Define category and class systems, which will be used in different AnnotationAnalyzer methods.
+- `annotation_schema_mapping`: Define annotation schema to category and class system mappings for AnnotationAnalyzers get_corpus_annotation_statistics method.
+- `eng_key_translation`: Define english translations for category and class systems.

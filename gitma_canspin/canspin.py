@@ -8,10 +8,8 @@ from gitma_canspin._helper import (
     prevent_division_by_zero,
     translate_dict, 
     abs_local_save_path, 
-    canspin_catma_projects, 
     canspin_annotation_tsv_columns,
-    canspin_annotation_schema_mapping,
-    key_translation
+    ConfigLoader
 )
 
 import pandas as pd
@@ -27,8 +25,6 @@ import re
 from typing import Union, Tuple, Dict, List, Generator
 
 import plotly.graph_objects
-import pygal
-from collections import Counter
 import plotly.express as px
 import plotly
 import numpy as np
@@ -55,6 +51,8 @@ class CanspinProject:
             init_settings: Union[dict, None] = None):
         
         self.default_init_settings: dict = {
+            'init_with_catma_project': True,
+            'init_with_tsv_annotations': True,
             'project_name': 'CATMA_4AA4ADC0-4C28-54F9-B6A1-5DCEFF34B90B_DH2025_CANSpiN',
             'selected_annotation_collection': None,
             'load_from_gitlab': False,
@@ -63,12 +61,14 @@ class CanspinProject:
 
         self.init_settings: dict = self.default_init_settings if not init_settings else init_settings
 
-        self.project: Union[CatmaProject, None] = imported_project if imported_project else self.load_project()
+        self.gitma_canspin_config: dict = ConfigLoader().data
+
+        self.project: Union[CatmaProject, None] = imported_project if imported_project else (self._load_project() if self.init_settings['init_with_catma_project'] else None)
         self.unify_plain_text_line_endings()
 
-        self.tsv_annotations: Dict[str, Dict[str, pd.DataFrame]] = self.load_tsv_annotations()
+        self.tsv_annotations: Union[Dict[str, Dict[str, pd.DataFrame]], None] = self._load_tsv_annotations() if self.init_settings['init_with_tsv_annotations'] else None
 
-    def load_project(self) -> Union[CatmaProject, None]:
+    def _load_project(self) -> Union[CatmaProject, None]:
         """Method to fill self.project with a CatmaProject instance downloaded from Catmas gitlab or from local folder.
 
         Returns:
@@ -84,6 +84,12 @@ class CanspinProject:
         except:
             logger.warning('Could not load the Catma project.', exc_info=True)
             return None
+        
+    def load_project(self) -> None:
+        """Public method to use self._load_project() to fill self.project with a CatmaProject instance.
+        It does not return anything and should be used, if a CatmaProject is to be loaded in a CanspinProject, which has been initialized without loading a CatmaProject.
+        """
+        self.project = self._load_project()
 
     def unify_plain_text_line_endings(self) -> None:
         """Helper method which checks if text in CatmaProject object was loaded on a windows system.
@@ -117,7 +123,7 @@ class CanspinProject:
         except:
             logger.warning('Could not update the Catma project.', exc_info=True)
 
-    def load_tsv_annotations(self) -> Dict[str, Dict[str, pd.DataFrame]]:
+    def _load_tsv_annotations(self) -> Dict[str, Dict[str, pd.DataFrame]]:
         """Method to fill self.tsv_annotations with a dict of dicts containing a tsv filename as key and a Dataframe with the respective annotation data as value.
         The Data is derived from the tsv folders within the CANSpiN corpora repos. For that, the corpus.yaml inside the repos is processed as well as the respective tsv folders.
         The keys of the dict equal the annotation schemes of the corpus found in the corpus.yaml.
@@ -127,13 +133,17 @@ class CanspinProject:
         Returns:
             Dict[str, Dict[str, pd.DataFrame]] or an empty dict: A dict with a dict of lists of Dataframes derived from the annotation tsv files or an empty dict in case of missing tsv files or repo folders.
         """
-        # get corpus repos in project folder, using hardcoded dict canspin_catma_projects from helper module
+        # get corpus repos in project folder, using catma_projects dict from ConfigLoader in self.gitma_canspin_config['catma_projects']
         rel_local_save_path = os.getcwd()
         folders_in_project_folder: List[str] = os.listdir(rel_local_save_path)
-        projects_corpora_folders_in_project_folder: List[str] = [folder for folder in folders_in_project_folder if self.init_settings['project_name'] in canspin_catma_projects and folder in canspin_catma_projects[self.init_settings['project_name']]['corpora_folders']]
+        projects_corpora_folders_in_project_folder: List[str] = [
+            folder for folder in folders_in_project_folder \
+            if self.init_settings['project_name'] in self.gitma_canspin_config['catma_projects'] \
+            and folder in self.gitma_canspin_config['catma_projects'][self.init_settings['project_name']]['corpora_folders']
+        ]
 
         if not projects_corpora_folders_in_project_folder:
-            logger.info(f"No annotation tsv files loaded for the given project name: not a canspin project or missing canspin corpora folders.")
+            logger.info(f"No annotation tsv files loaded for the given project name: no corpora folder found following the definitions inside the gitma-canspin config file.")
             return dict()
 
         # load each corpus yaml
@@ -196,6 +206,14 @@ class CanspinProject:
             }
 
         return result
+    
+    def load_tsv_annotations(self) -> None:
+        """Public method to use self._load_tsv_annotations() to fill self.tsv_annotations with tsv annotation data.
+        It does not return anything and should be used, if tsv annotations are to be loaded in a CanspinProject, which has been initialized without loading tsv annotations.
+        """
+        self.tsv_annotations = self._load_tsv_annotations()
+        if len(self.tsv_annotations.keys()):
+            logger.info('Annotation tsv files successfully loaded.')
 
     def tsv_annotations_has_data(self) -> bool:
         """Helper method to determine if any dataframes are saved inside the tsv_annotations dict.
@@ -515,6 +533,8 @@ class AnnotationAnalyzer(CanspinProject):
         )
 
         self.default_get_corpus_annotation_statistics_settings: dict = {
+            # category_and_class_system (str): specifies the category and class system to be used out of the selection saved in self.gitma_canspin_config['category_and_class_systems']
+            'category_and_class_system': 'CS1 v1.1.0 deu',
             # calculations (dict): specifies, which statistics will be calculated when executing the get_corpus_annotation_statistics method
             'calculations': {
                 'amount_of_annotations': True,
@@ -579,7 +599,7 @@ class AnnotationAnalyzer(CanspinProject):
             #   'kaleido': use kaleido
             #   'orca': use orca
             'svg_render_engine': 'auto',
-            # category_and_class_system_name (str): select which category and classes should be selected in self.category_and_class_systems
+            # category_and_class_system_name (str): select which category and classes should be selected in self.gitma_canspin_config['category_and_class_systems']
             'category_and_class_system_name': 'CS1 v1.1.0 deu',
             # translate_classes_to_english (bool): based on the category_and_class_system_name the classes can be translated to English if a translation dict for this class system and language exists
             'translate_classes_to_english': False,
@@ -587,134 +607,8 @@ class AnnotationAnalyzer(CanspinProject):
             'save_data_to_json': False
         }
         self.default_render_overview_pie_chart_settings: dict = {
-            # category_and_class_system_name (str): select which category and classes should be selected in self.category_and_class_systems
+            # category_and_class_system_name (str): select which category and classes should be selected in self.gitma_canspin_config['category_and_class_systems']
             'category_and_class_system_name': 'CS1 v1.1.0 deu'
-        }
-        self.category_and_class_systems: dict = {
-            'CS1 v1.0.0 deu': {
-                'languages': ['deu'],
-                'categories': {
-                    'Bewegung': '#B60000',
-                    'Dimensionierung': '#7CD3C0',
-                    'Ort': '#B6D3FF',
-                    'Positionierung': '#DB8300',
-                    'Richtung': '#92FFBD'
-                },
-                'classes': {
-                    'Ort-Container': '#B6D3FF',
-                    'Ort-Container-BK': '#CCDEFF',
-                    'Ort-Objekt': '#D4EAFF',
-                    'Ort-Objekt-BK': '#E6F2FF',
-                    'Ort-Abstrakt': '#89A8F6',
-                    'Ort-Abstrakt-BK': '#98C3FA',
-                    'Ort-UE-XR': '#90A6C7',
-                    'Ort-UE-RX': '#8093AD',
-                    'Ort-UE-RR': '#6F8096',
-                    'Bewegung-Subjekt': '#FF6D6D',
-                    'Bewegung-Objekt': '#F60D00',
-                    'Bewegung-Schall': '#FF4949',
-                    'Bewegung-Licht': '#CA0B0B',
-                    'Bewegung-Geruch': '#B60000',
-                    'Bewegung-UE-XR': '#960000',
-                    'Bewegung-UE-RX': '#7D0000',
-                    'Bewegung-UE-RR': '#610000',
-                    'Richtung': '#92FFBD',
-                    'Richtung-UE-XR': '#75CC96',
-                    'Richtung-UE-RX': '#69B584',
-                    'Richtung-UE-RR': '#599970',
-                    'Positionierung': '#DB8300',
-                    'Positionierung-UE-XR': '#B56A01',
-                    'Positionierung-UE-RX': '#995A02',
-                    'Positionierung-UE-RR': '#804B01',
-                    'Dimensionierung-Abstand': '#8AB6AD',
-                    'Dimensionierung-Groesse': '#7CD3C0',
-                    'Dimensionierung-Menge': '#7EF5D9',
-                    'Dimensionierung-UE-XR': '#60847B',
-                    'Dimensionierung-UE-RX': '#49615B',
-                    'Dimensionierung-UE-RR': '#344541'
-                }
-            },
-            'CS1 v1.1.0 deu': {
-                'languages': ['deu'],
-                'categories': {
-                    'Bewegung': '#B60000',
-                    'Dimensionierung': '#7CD3C0',
-                    'Ort': '#B6D3FF',
-                    'Positionierung': '#DB8300',
-                    'Richtung': '#92FFBD'
-                },
-                'classes': {
-                    'Ort-Container': '#B6D3FF',
-                    'Ort-Container-BK': '#CCDEFF',
-                    'Ort-Objekt': '#D4EAFF',
-                    'Ort-Objekt-BK': '#E6F2FF',
-                    'Ort-Abstrakt': '#89A8F6',
-                    'Ort-Abstrakt-BK': '#98C3FA',
-                    'Ort-ALT': '#90A6C7',
-                    'Bewegung-Subjekt': '#FF6D6D',
-                    'Bewegung-Objekt': '#F60D00',
-                    'Bewegung-Schall': '#FF4949',
-                    'Bewegung-Licht': '#CA0B0B',
-                    'Bewegung-Geruch': '#B60000',
-                    'Bewegung-ALT': '#960000',
-                    'Richtung': '#92FFBD',
-                    'Richtung-ALT': '#75CC96',
-                    'Positionierung': '#DB8300',
-                    'Positionierung-ALT': '#B56A01',
-                    'Dimensionierung-Abstand': '#8AB6AD',
-                    'Dimensionierung-Groesse': '#7CD3C0',
-                    'Dimensionierung-Menge': '#7EF5D9',
-                    'Dimensionierung-ALT': '#60847B'
-                }
-            },
-            'CS1 v1.1.0 spa': {
-                'languages': ['spa'],
-                'categories': {
-                    'Movimiento': '#B60000',
-                    'Dimensionamiento': '#7CD3C0',
-                    'Lugar': '#B6D3FF',
-                    'Posicionamiento': '#DB8300',
-                    'Dirección': '#92FFBD'
-                },
-                'classes': {
-                    'Lugar-Contenedor': '#B6D3FF',
-                    'Lugar-Contenedor-CM': '#CCDEFF',
-                    'Lugar-Objeto': '#D4EAFF',
-                    'Lugar-Objeto-CM': '#E6F2FF',
-                    'Lugar-Abstracto': '#89A8F6',
-                    'Lugar-Abstracto-CM': '#98C3FA',
-                    'Lugar-ALT': '#90A6C7',
-                    'Movimiento-Sujeto': '#FF6D6D',
-                    'Movimiento-Objeto': '#F60D00',
-                    'Movimiento-Sonido': '#FF4949',
-                    'Movimiento-Luz': '#CA0B0B',
-                    'Movimiento-Olfato': '#B60000',
-                    'Movimiento-ALT': '#960000',
-                    'Dirección': '#92FFBD',
-                    'Dirección-ALT': '#75CC96',
-                    'Posicionamiento': '#DB8300',
-                    'Posicionamiento-ALT': '#B56A01',
-                    'Dimensionamiento-Distancia': '#8AB6AD',
-                    'Dimensionamiento-Tamaño': '#7CD3C0',
-                    'Dimensionamiento-Cantitad': '#7EF5D9',
-                    'Dimensionamiento-ALT': '#60847B'
-                }
-            },
-            'spaceAN v1.0.0' : {
-                'languages': ['deu', 'spa'],
-                'categories': {
-                    'CONTAINER': '#9dc3fd',
-                    'OBJECT': '#7bf8d2',
-                },
-                'classes': {
-                    'CONTAINER-ARTEFACT': '#9dc3fd',
-                    'CONTAINER-NATURAL': '#7192c4',
-                    'CONTAINER-REGION': '#4d678d',
-                    'CONTAINER-SETTLEMENT': '#334663',
-                    'OBJECT-ARTEFACT': '#7bf8d2',
-                    'OBJECT-NATURAL': '#64b39b'
-                }
-            }
         }
     
     def _load_tsv_files(
@@ -761,7 +655,7 @@ class AnnotationAnalyzer(CanspinProject):
             df_without_iob_prefixes_on_tags: pd.DataFrame = df['Tag'].apply(lambda x: x[2:] if x != 'O' else 'O')
             all_tags: np.ndarray = df_without_iob_prefixes_on_tags.unique()
             canspin_tags: np.ndarray = all_tags[all_tags != 'O']
-            out_of_schema_tags: bool = bool([tag for tag in canspin_tags if tag not in self.category_and_class_systems[render_settings['category_and_class_system_name']]['classes']])
+            out_of_schema_tags: bool = bool([tag for tag in canspin_tags if tag not in self.gitma_canspin_config['category_and_class_systems'][render_settings['category_and_class_system_name']]['classes']])
             if out_of_schema_tags:
                 raise ValueError('The tsv file does contain tags which does not belong to the class system selected in the render settings.')
 
@@ -816,7 +710,7 @@ class AnnotationAnalyzer(CanspinProject):
             self, 
             input_data: Union[pd.DataFrame, List[str]],
             render_overview_pie_chart_settings: Union[dict, None] = None,
-            export_filename: str = 'overview_pie_chart_export') -> None:
+            export_filename: Union[str, None] = 'overview_pie_chart_export') -> None:
         """Method for rendering a plotly pie chart as html, refering to the whole data as basic quantity given via the input_tsv parameter.
         Uses the plotly.express.sunburst method and data derived pandas dataframes or tsv files following the CANSpiN annotation file schema.
         Saves the output html in the project_folder/images folder or a self defined folder and shows it with plotly's default renderer settings.
@@ -824,7 +718,7 @@ class AnnotationAnalyzer(CanspinProject):
         Args:
             input_data (Union[pd.DataFrame, str]): Designed to take a pandas dataframe from the CanspinProject's self.tsv_annotations dict or one or more tsv files.
             render_overview_pie_chart_settings (Union[dict, None], optional): Delivers custom setting for the category and class system used in the visualization. Defaults to default_render_overview_pie_chart_settings.
-            export_filename(str): Name of output file with pie chart, which is saved in the project_folder/images folder, if no file extension is provided. If a file extension is provided, the export_filename input is taken as a filepath and the chart will be saved there. Defaults to 'overview_pie_chart_export'.
+            export_filename (Union[str, None]): Name of output file with pie chart, which is saved in the project_folder/images folder, if no file extension is provided. If a file extension is provided, the export_filename input is taken as a filepath and the chart will be saved there. Use None, if you dont want to save to file at all. Defaults to 'overview_pie_chart_export'.
         """           
         render_settings: dict = self.default_render_overview_pie_chart_settings if not render_overview_pie_chart_settings else render_overview_pie_chart_settings
         tsv_data_df: pd.DataFrame = input_data if isinstance(input_data, pd.DataFrame) else self._load_tsv_files(tsv_filepath_list=input_data, render_settings=render_settings)
@@ -852,8 +746,8 @@ class AnnotationAnalyzer(CanspinProject):
         df_grouped = new_df.sort_values(by=['Tag_categories', 'Tag_classes'])
 
         color_discrete_map = {
-            **self.category_and_class_systems[render_settings['category_and_class_system_name']]['categories'],
-            **self.category_and_class_systems[render_settings['category_and_class_system_name']]['classes']
+            **self.gitma_canspin_config['category_and_class_systems'][render_settings['category_and_class_system_name']]['categories'],
+            **self.gitma_canspin_config['category_and_class_systems'][render_settings['category_and_class_system_name']]['classes']
         }
 
         fig = px.sunburst(
@@ -880,20 +774,21 @@ class AnnotationAnalyzer(CanspinProject):
             font=dict(size=20)
         )
 
-        html_str: str = fig.to_html()
-        html_filepath_str: str = os.path.join(abs_local_save_path, 'images', f'{export_filename}.html') \
-                                 if '.html' not in export_filename \
-                                 else export_filename
+        if export_filename:
+            html_str: str = fig.to_html()
+            html_filepath_str: str = os.path.join(abs_local_save_path, 'images', f'{export_filename}.html') \
+                                    if '.html' not in export_filename \
+                                    else export_filename
 
-        if (os.path.isfile(html_filepath_str)):
-            logger.info(f'HTML file {html_filepath_str} already exists and will be overwritten.')
+            if (os.path.isfile(html_filepath_str)):
+                logger.info(f'HTML file {html_filepath_str} already exists and will be overwritten.')
 
-        if (os.path.dirname(html_filepath_str)) and not (os.path.isdir(os.path.dirname(html_filepath_str))):
-            makedir_if_necessary(os.path.dirname(html_filepath_str))
+            if (os.path.dirname(html_filepath_str)) and not (os.path.isdir(os.path.dirname(html_filepath_str))):
+                makedir_if_necessary(os.path.dirname(html_filepath_str))
 
-        with open(html_filepath_str, 'w', encoding='utf-8') as file:
-            file.write(html_str)
-            logger.info(f'HTML file {html_filepath_str} successfully created.')
+            with open(html_filepath_str, 'w', encoding='utf-8') as file:
+                file.write(html_str)
+                logger.info(f'HTML file {html_filepath_str} successfully created.')
             
         fig.show()
 
@@ -921,7 +816,7 @@ class AnnotationAnalyzer(CanspinProject):
             'text_units': [], # List[int]
             'last_text_unit_amount': 0, # int
             'class_instance_counter': {}, # Dict[str, List[int]]
-            'class_list': self.category_and_class_systems[render_settings['category_and_class_system_name']]['classes'] # Dict[str, str]
+            'class_list': self.gitma_canspin_config['category_and_class_systems'][render_settings['category_and_class_system_name']]['classes'] # Dict[str, str]
         }
 
         for classname in list(_my_globals['class_list'].keys()):
@@ -956,15 +851,15 @@ class AnnotationAnalyzer(CanspinProject):
             # create and return output dataframe, translate the classes to English if necessary
             output_df_structure: dict = {'Text_Unit': _my_globals['text_units'], **_my_globals['class_instance_counter']}
 
-            if render_settings['translate_classes_to_english'] and render_settings['category_and_class_system_name'] in key_translation:
-                _my_globals['class_list'] = translate_dict(input=_my_globals['class_list'], translation=key_translation[render_settings['category_and_class_system_name']])
-                output_df_structure = translate_dict(input=output_df_structure, translation=key_translation[render_settings['category_and_class_system_name']])
+            if render_settings['translate_classes_to_english'] and render_settings['category_and_class_system_name'] in self.gitma_canspin_config['eng_key_translation']:
+                _my_globals['class_list'] = translate_dict(input=_my_globals['class_list'], translation=self.gitma_canspin_config['eng_key_translation'][render_settings['category_and_class_system_name']])
+                output_df_structure = translate_dict(input=output_df_structure, translation=self.gitma_canspin_config['eng_key_translation'][render_settings['category_and_class_system_name']])
 
             return pd.DataFrame(output_df_structure)
 
         def _transform_with_sentence_separation(input: pd.DataFrame, separation_unit_amount: int = render_settings['separation_unit_amount']) -> pd.DataFrame:
             for row_index, row in input.iterrows():
-                # ! critical TODO: create dataframe with sections defined per sentence
+                # TODO: create dataframe with sections defined per sentence
                 #
                 # transform
                 # from:
@@ -1407,11 +1302,11 @@ class AnnotationAnalyzer(CanspinProject):
                     file_summary: dict = filtered_df_without_iob_schema.value_counts().to_dict()
 
                     # add missing classes of the schema to the file_summary dict, if the schema is known and no instances of the respective classes exist in the dataframe
-                    if file_tuple[0] in canspin_annotation_schema_mapping:
-                        # determine current class system name by language, with help of canspin_annotation_schema_mapping
+                    if file_tuple[0] in self.gitma_canspin_config['annotation_schema_mapping']:
+                        # determine current class system name by language, with help of self.gitma_canspin_config['annotation_schema_mapping']
                         corpus = file_tuple[1].split('_')[0].lower()
 
-                        # TODO: undo hardcoding and build language recognition based on configuration files
+                        # ! next TODO: undo hardcoding and build language recognition based on configuration files
                         current_language: Union[str, None] = 'deu' if corpus.split('-')[1] == 'deu' else \
                                                              ('spa' if corpus.split('-')[1] in ['spa', 'lat'] else None)
 
@@ -1424,23 +1319,28 @@ class AnnotationAnalyzer(CanspinProject):
                                     result['amount_of_annotations_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
                             continue
 
-                        current_category_and_class_system_name: Union[str, None] = next(
-                            (category_and_class_system_name for category_and_class_system_name in self.category_and_class_systems \
-                            if current_language in self.category_and_class_systems[category_and_class_system_name]['languages'] \
-                            and category_and_class_system_name in canspin_annotation_schema_mapping[file_tuple[0]]),
+                        current_category_and_class_system_name: Union[str, None] = get_corpus_annotation_statistics_settings['category_and_class_system'] if \
+                            get_corpus_annotation_statistics_settings['category_and_class_system'] in self.gitma_canspin_config['category_and_class_systems'] else \
                             None
-                        )
 
                         if not current_category_and_class_system_name:
-                            logger.info(f'The category and class system name of {file_tuple[1]} (in schema {file_tuple[0]}) could not be determined. Skipping the addition of classes with missing instances for this file..')
-                            for file_tuple_group in file_tuple_groups:
-                                if len(file_tuple_group) == 1:
-                                    result['amount_of_annotations_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple[1]] = file_summary
-                                elif len(file_tuple_group) == 2:
-                                    result['amount_of_annotations_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
-                            continue
+                            current_category_and_class_system_name = next(
+                                (category_and_class_system_name for category_and_class_system_name in self.gitma_canspin_config['category_and_class_systems'] \
+                                if current_language in self.gitma_canspin_config['category_and_class_systems'][category_and_class_system_name]['languages'] \
+                                and category_and_class_system_name in self.gitma_canspin_config['annotation_schema_mapping'][file_tuple[0]]),
+                                None
+                            )
 
-                        for classname in self.category_and_class_systems[current_category_and_class_system_name]['classes']:
+                            if not current_category_and_class_system_name:
+                                logger.info(f'The category and class system name of {file_tuple[1]} (in schema {file_tuple[0]}) could not be determined. Skipping the addition of classes with missing instances for this file..')
+                                for file_tuple_group in file_tuple_groups:
+                                    if len(file_tuple_group) == 1:
+                                        result['amount_of_annotations_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple[1]] = file_summary
+                                    elif len(file_tuple_group) == 2:
+                                        result['amount_of_annotations_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
+                                continue
+
+                        for classname in self.gitma_canspin_config['category_and_class_systems'][current_category_and_class_system_name]['classes']:
                             if classname not in file_summary:
                                 file_summary[classname] = 0
 
@@ -1513,9 +1413,9 @@ class AnnotationAnalyzer(CanspinProject):
                     file_summary: dict = filtered_df_without_iob_schema.value_counts().to_dict()
 
                     # add missing classes of the schema to the file_summary dict, if the schema is known and no instances of the respective classes exist in the dataframe
-                    if schema in canspin_annotation_schema_mapping:
-                        # determine current class system name by language, with help of canspin_annotation_schema_mapping
-                        # TODO: undo hardcoding and build language recognition based on configuration files
+                    if schema in self.gitma_canspin_config['annotation_schema_mapping']:
+                        # determine current class system name by language, with help of self.gitma_canspin_config['annotation_schema_mapping']
+                        # ! next TODO: undo hardcoding and build language recognition based on configuration files
                         current_language: Union[str, None] = 'deu' if corpus.split('-')[1] == 'deu' else \
                                                              ('spa' if corpus.split('-')[1] in ['spa', 'lat'] else None)
 
@@ -1524,19 +1424,24 @@ class AnnotationAnalyzer(CanspinProject):
                             result['amount_of_annotations_by_class'][schema][corpus][filename] = file_summary
                             continue
 
-                        current_category_and_class_system_name: Union[str, None] = next(
-                            (category_and_class_system_name for category_and_class_system_name in self.category_and_class_systems \
-                            if current_language in self.category_and_class_systems[category_and_class_system_name]['languages'] \
-                            and category_and_class_system_name in canspin_annotation_schema_mapping[schema]),
+                        current_category_and_class_system_name: Union[str, None] = get_corpus_annotation_statistics_settings['category_and_class_system'] if \
+                            get_corpus_annotation_statistics_settings['category_and_class_system'] in self.gitma_canspin_config['category_and_class_systems'] else \
                             None
-                        )
 
                         if not current_category_and_class_system_name:
-                            logger.info(f'The category and class system name of {filename} (in schema {schema}) could not be determined. Skipping the addition of classes with missing instances for this file..')
-                            result['amount_of_annotations_by_class'][schema][corpus][filename] = file_summary
-                            continue
+                            current_category_and_class_system_name = next(
+                                (category_and_class_system_name for category_and_class_system_name in self.gitma_canspin_config['category_and_class_systems'] \
+                                if current_language in self.gitma_canspin_config['category_and_class_systems'][category_and_class_system_name]['languages'] \
+                                and category_and_class_system_name in self.gitma_canspin_config['annotation_schema_mapping'][schema]),
+                                None
+                            )
 
-                        for classname in self.category_and_class_systems[current_category_and_class_system_name]['classes']:
+                            if not current_category_and_class_system_name:
+                                logger.info(f'The category and class system name of {filename} (in schema {schema}) could not be determined. Skipping the addition of classes with missing instances for this file..')
+                                result['amount_of_annotations_by_class'][schema][corpus][filename] = file_summary
+                                continue
+
+                        for classname in self.gitma_canspin_config['category_and_class_systems'][current_category_and_class_system_name]['classes']:
                             if classname not in file_summary:
                                 file_summary[classname] = 0
 
@@ -1835,11 +1740,11 @@ class AnnotationAnalyzer(CanspinProject):
                         del file_summary['O']
 
                     # add missing classes of the schema to the file_summary dict, if the schema is known and no instances of the respective classes exist in the dataframe
-                    if file_tuple[0] in canspin_annotation_schema_mapping:
-                        # determine current class system name by language, with help of canspin_annotation_schema_mapping
+                    if file_tuple[0] in self.gitma_canspin_config['annotation_schema_mapping']:
+                        # determine current class system name by language, with help of self.gitma_canspin_config['annotation_schema_mapping']
                         corpus = file_tuple[1].split('_')[0].lower()
 
-                        # TODO: undo hardcoding and build language recognition based on configuration files
+                        # ! next TODO: undo hardcoding and build language recognition based on configuration files
                         current_language: Union[str, None] = 'deu' if corpus.split('-')[1] == 'deu' else \
                                                              ('spa' if corpus.split('-')[1] in ['spa', 'lat'] else None)
 
@@ -1852,23 +1757,28 @@ class AnnotationAnalyzer(CanspinProject):
                                     result['amount_of_annotated_token_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
                             continue
 
-                        current_category_and_class_system_name: Union[str, None] = next(
-                            (category_and_class_system_name for category_and_class_system_name in self.category_and_class_systems \
-                            if current_language in self.category_and_class_systems[category_and_class_system_name]['languages'] \
-                            and category_and_class_system_name in canspin_annotation_schema_mapping[file_tuple[0]]),
+                        current_category_and_class_system_name: Union[str, None] = get_corpus_annotation_statistics_settings['category_and_class_system'] if \
+                            get_corpus_annotation_statistics_settings['category_and_class_system'] in self.gitma_canspin_config['category_and_class_systems'] else \
                             None
-                        )
 
                         if not current_category_and_class_system_name:
-                            logger.info(f'The category and class system name of {file_tuple[1]} (in schema {file_tuple[0]}) could not be determined. Skipping the addition of classes with missing instances for this file..')
-                            for file_tuple_group in file_tuple_groups:
-                                if len(file_tuple_group) == 1:
-                                    result['amount_of_annotated_token_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple[1]] = file_summary
-                                elif len(file_tuple_group) == 2:
-                                    result['amount_of_annotated_token_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
-                            continue
+                            current_category_and_class_system_name = next(
+                                (category_and_class_system_name for category_and_class_system_name in self.gitma_canspin_config['category_and_class_systems'] \
+                                if current_language in self.gitma_canspin_config['category_and_class_systems'][category_and_class_system_name]['languages'] \
+                                and category_and_class_system_name in self.gitma_canspin_config['annotation_schema_mapping'][file_tuple[0]]),
+                                None
+                            )
 
-                        for classname in self.category_and_class_systems[current_category_and_class_system_name]['classes']:
+                            if not current_category_and_class_system_name:
+                                logger.info(f'The category and class system name of {file_tuple[1]} (in schema {file_tuple[0]}) could not be determined. Skipping the addition of classes with missing instances for this file..')
+                                for file_tuple_group in file_tuple_groups:
+                                    if len(file_tuple_group) == 1:
+                                        result['amount_of_annotated_token_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple[1]] = file_summary
+                                    elif len(file_tuple_group) == 2:
+                                        result['amount_of_annotated_token_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
+                                continue
+
+                        for classname in self.gitma_canspin_config['category_and_class_systems'][current_category_and_class_system_name]['classes']:
                             if classname not in file_summary:
                                 file_summary[classname] = 0
 
@@ -1942,9 +1852,9 @@ class AnnotationAnalyzer(CanspinProject):
                         del file_summary['O']
 
                     # add missing classes of the schema to the file_summary dict, if the schema is known and no instances of the respective classes exist in the dataframe
-                    if schema in canspin_annotation_schema_mapping:
-                        # determine current class system name by language, with help of canspin_annotation_schema_mapping
-                        # TODO: undo hardcoding and build language recognition based on configuration files
+                    if schema in self.gitma_canspin_config['annotation_schema_mapping']:
+                        # determine current class system name by language, with help of self.gitma_canspin_config['annotation_schema_mapping']
+                        # ! next TODO: undo hardcoding and build language recognition based on configuration files
                         current_language: Union[str, None] = 'deu' if corpus.split('-')[1] == 'deu' else \
                                                              ('spa' if corpus.split('-')[1] in ['spa', 'lat'] else None)
 
@@ -1953,19 +1863,24 @@ class AnnotationAnalyzer(CanspinProject):
                             result['amount_of_annotated_token_by_class'][schema][corpus][filename] = file_summary
                             continue
 
-                        current_category_and_class_system_name: Union[str, None] = next(
-                            (category_and_class_system_name for category_and_class_system_name in self.category_and_class_systems \
-                            if current_language in self.category_and_class_systems[category_and_class_system_name]['languages'] \
-                            and category_and_class_system_name in canspin_annotation_schema_mapping[schema]),
+                        current_category_and_class_system_name: Union[str, None] = get_corpus_annotation_statistics_settings['category_and_class_system'] if \
+                            get_corpus_annotation_statistics_settings['category_and_class_system'] in self.gitma_canspin_config['category_and_class_systems'] else \
                             None
-                        )
 
                         if not current_category_and_class_system_name:
-                            logger.info(f'The category and class system name of {filename} (in schema {schema}) could not be determined. Skipping the addition of classes with missing instances for this file..')
-                            result['amount_of_annotated_token_by_class'][schema][corpus][filename] = file_summary
-                            continue
+                            current_category_and_class_system_name = next(
+                                (category_and_class_system_name for category_and_class_system_name in self.gitma_canspin_config['category_and_class_systems'] \
+                                if current_language in self.gitma_canspin_config['category_and_class_systems'][category_and_class_system_name]['languages'] \
+                                and category_and_class_system_name in self.gitma_canspin_config['annotation_schema_mapping'][schema]),
+                                None
+                            )
 
-                        for classname in self.category_and_class_systems[current_category_and_class_system_name]['classes']:
+                            if not current_category_and_class_system_name:
+                                logger.info(f'The category and class system name of {filename} (in schema {schema}) could not be determined. Skipping the addition of classes with missing instances for this file..')
+                                result['amount_of_annotated_token_by_class'][schema][corpus][filename] = file_summary
+                                continue
+
+                        for classname in self.gitma_canspin_config['category_and_class_systems'][current_category_and_class_system_name]['classes']:
                             if classname not in file_summary:
                                 file_summary[classname] = 0
 
@@ -2018,7 +1933,7 @@ class AnnotationAnalyzer(CanspinProject):
 
             # execute ratios calculation with custom groups
             if custom_grouping:
-                # TODO: implement calculation with custom grouping
+                # ! next TODO: implement calculation with custom grouping
                 raise NotImplementedError
 
             # execute ratios calculation with default groups by annotation schema and corpus
@@ -2354,11 +2269,11 @@ class AnnotationAnalyzer(CanspinProject):
                         file_summary[classname] = filtered_df_with_annotated_token_of_class.Token.value_counts().to_dict()
 
                     # add missing classes of the schema to the file_summary dict, if the schema is known and no instances of the respective classes exist in the dataframe
-                    if file_tuple[0] in canspin_annotation_schema_mapping:
-                        # determine current class system name by language, with help of canspin_annotation_schema_mapping
+                    if file_tuple[0] in self.gitma_canspin_config['annotation_schema_mapping']:
+                        # determine current class system name by language, with help of self.gitma_canspin_config['annotation_schema_mapping']
                         corpus = file_tuple[1].split('_')[0].lower()
 
-                        # TODO: undo hardcoding and build language recognition based on configuration files
+                        # ! next TODO: undo hardcoding and build language recognition based on configuration files
                         current_language: Union[str, None] = 'deu' if corpus.split('-')[1] == 'deu' else \
                                                              ('spa' if corpus.split('-')[1] in ['spa', 'lat'] else None)
 
@@ -2371,23 +2286,28 @@ class AnnotationAnalyzer(CanspinProject):
                                     result['word_lists_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
                             continue
 
-                        current_category_and_class_system_name: Union[str, None] = next(
-                            (category_and_class_system_name for category_and_class_system_name in self.category_and_class_systems \
-                            if current_language in self.category_and_class_systems[category_and_class_system_name]['languages'] \
-                            and category_and_class_system_name in canspin_annotation_schema_mapping[file_tuple[0]]),
+                        current_category_and_class_system_name: Union[str, None] = get_corpus_annotation_statistics_settings['category_and_class_system'] if \
+                            get_corpus_annotation_statistics_settings['category_and_class_system'] in self.gitma_canspin_config['category_and_class_systems'] else \
                             None
-                        )
 
                         if not current_category_and_class_system_name:
-                            logger.info(f'The category and class system name of {file_tuple[1]} (in schema {file_tuple[0]}) could not be determined. Skipping the addition of classes with missing instances for this file..')
-                            for file_tuple_group in file_tuple_groups:
-                                if len(file_tuple_group) == 1:
-                                    result['word_lists_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple[1]] = file_summary
-                                elif len(file_tuple_group) == 2:
-                                    result['word_lists_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
-                            continue
+                            current_category_and_class_system_name = next(
+                                (category_and_class_system_name for category_and_class_system_name in self.gitma_canspin_config['category_and_class_systems'] \
+                                if current_language in self.gitma_canspin_config['category_and_class_systems'][category_and_class_system_name]['languages'] \
+                                and category_and_class_system_name in self.gitma_canspin_config['annotation_schema_mapping'][file_tuple[0]]),
+                                None
+                            )
 
-                        for classname in self.category_and_class_systems[current_category_and_class_system_name]['classes']:
+                            if not current_category_and_class_system_name:
+                                logger.info(f'The category and class system name of {file_tuple[1]} (in schema {file_tuple[0]}) could not be determined. Skipping the addition of classes with missing instances for this file..')
+                                for file_tuple_group in file_tuple_groups:
+                                    if len(file_tuple_group) == 1:
+                                        result['word_lists_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple[1]] = file_summary
+                                    elif len(file_tuple_group) == 2:
+                                        result['word_lists_by_class'][file_tuple[0]][file_tuple_group[0]][file_tuple_group[1]][file_tuple[1]] = file_summary
+                                continue
+
+                        for classname in self.gitma_canspin_config['category_and_class_systems'][current_category_and_class_system_name]['classes']:
                             if classname not in file_summary:
                                 file_summary[classname] = {}
 
@@ -2491,9 +2411,9 @@ class AnnotationAnalyzer(CanspinProject):
                         file_summary[classname] = filtered_df_with_annotated_token_of_class.Token.value_counts().to_dict()
 
                     # add missing classes of the schema to the file_summary dict, if the schema is known and no instances of the respective classes exist in the dataframe
-                    if schema in canspin_annotation_schema_mapping:
-                        # determine current class system name by language, with help of canspin_annotation_schema_mapping
-                        # TODO: undo hardcoding and build language recognition based on configuration files
+                    if schema in self.gitma_canspin_config['annotation_schema_mapping']:
+                        # determine current class system name by language, with help of self.gitma_canspin_config['annotation_schema_mapping']
+                        # ! next TODO: undo hardcoding and build language recognition based on configuration files
                         current_language: Union[str, None] = 'deu' if corpus.split('-')[1] == 'deu' else \
                                                              ('spa' if corpus.split('-')[1] in ['spa', 'lat'] else None)
 
@@ -2502,19 +2422,24 @@ class AnnotationAnalyzer(CanspinProject):
                             result['word_lists_by_class'][schema][corpus][filename] = file_summary
                             continue
 
-                        current_category_and_class_system_name: Union[str, None] = next(
-                            (category_and_class_system_name for category_and_class_system_name in self.category_and_class_systems \
-                            if current_language in self.category_and_class_systems[category_and_class_system_name]['languages'] \
-                            and category_and_class_system_name in canspin_annotation_schema_mapping[schema]),
+                        current_category_and_class_system_name: Union[str, None] = get_corpus_annotation_statistics_settings['category_and_class_system'] if \
+                            get_corpus_annotation_statistics_settings['category_and_class_system'] in self.gitma_canspin_config['category_and_class_systems'] else \
                             None
-                        )
 
                         if not current_category_and_class_system_name:
-                            logger.info(f'The category and class system name of {filename} (in schema {schema}) could not be determined. Skipping the addition of classes with missing instances for this file..')
-                            result['word_lists_by_class'][schema][corpus][filename] = file_summary
-                            continue
+                            current_category_and_class_system_name = next(
+                                (category_and_class_system_name for category_and_class_system_name in self.gitma_canspin_config['category_and_class_systems'] \
+                                if current_language in self.gitma_canspin_config['category_and_class_systems'][category_and_class_system_name]['languages'] \
+                                and category_and_class_system_name in self.gitma_canspin_config['annotation_schema_mapping'][schema]),
+                                None
+                            )
 
-                        for classname in self.category_and_class_systems[current_category_and_class_system_name]['classes']:
+                            if not current_category_and_class_system_name:
+                                logger.info(f'The category and class system name of {filename} (in schema {schema}) could not be determined. Skipping the addition of classes with missing instances for this file..')
+                                result['word_lists_by_class'][schema][corpus][filename] = file_summary
+                                continue
+
+                        for classname in self.gitma_canspin_config['category_and_class_systems'][current_category_and_class_system_name]['classes']:
                             if classname not in file_summary:
                                 file_summary[classname] = {}
 

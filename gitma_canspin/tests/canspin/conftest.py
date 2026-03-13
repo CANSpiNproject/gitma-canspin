@@ -19,6 +19,8 @@ def folder_cleanup(request):
 @pytest.fixture
 def create_canspin_project_1ac():
     return CanspinProject(init_settings={
+        'init_with_catma_project': True,
+        'init_with_tsv_annotations': True,
         'project_name': 'CATMA_5D2A90F0-4428-41CB-9D3A-E649CD1702C2_CANSpiN',
         'selected_annotation_collection': 'Gold AC Gold-Annotation-Test',
         'load_from_gitlab': False,
@@ -28,6 +30,8 @@ def create_canspin_project_1ac():
 @pytest.fixture
 def create_canspin_project_2acs():
     return CanspinProject(init_settings={
+        'init_with_catma_project': True,
+        'init_with_tsv_annotations': True,
         'project_name': 'CATMA_5D2A90F0-4428-41CB-9D3A-E649CD1702C2_CANSpiN',
         'selected_annotation_collection': ['Gold AC Gold-Annotation-Test', 'AC1 Gold-Annotation-Test'],
         'load_from_gitlab': False,

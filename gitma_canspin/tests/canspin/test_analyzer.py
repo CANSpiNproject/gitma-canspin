@@ -65,6 +65,7 @@ class TestAnalyzer:
         default_corpus_annotation_statistics_result: dict = analyzer.get_corpus_annotation_statistics()
         corpus_annotation_statistics_result_with_text_borders: dict = analyzer.get_corpus_annotation_statistics(
             {
+                'category_and_class_system': 'CS1 v1.1.0 deu',
                 'calculations': {
                     'amount_of_annotations': True,
                     'amount_of_annotations_by_class': True,
@@ -80,6 +81,7 @@ class TestAnalyzer:
         )
         corpus_annotation_statistics_result_with_custom_grouping: dict = analyzer.get_corpus_annotation_statistics(
             {
+                'category_and_class_system': 'CS1 v1.1.0 deu',
                 'calculations': {
                     'amount_of_annotations': True,
                     'amount_of_annotations_by_class': True,
